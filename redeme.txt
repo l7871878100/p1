@@ -1,0 +1,6 @@
+api:
+
+        管理页面
+
+            /admin: 返回管理页面
+            /admin/audit/{id}: 审核帖子，
