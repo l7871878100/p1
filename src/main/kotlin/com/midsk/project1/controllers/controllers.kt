@@ -1,14 +1,12 @@
 package com.midsk.project1.controllers
 
 import com.midsk.project1.models.Message
-import com.midsk.project1.models.User
 import com.midsk.project1.services.IMessageService
-import com.midsk.project1.services.IUserService
-import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
+import org.springframework.data.web.PageableDefault
 import org.springframework.stereotype.Controller
-import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.*
 import java.io.Serializable
 import java.security.Principal
@@ -32,85 +30,98 @@ fun getIpAddr(request: HttpServletRequest): String {
 
 
 @RestController
-class MainController(
-        private val messageService: IMessageService,
-        private val userService: IUserService
-) {
+class MainController(private val messageService: IMessageService) {
+
 
     /**
-     * 普通用户发布消息接口
+     * 消息主题列表
      */
-    @PostMapping("/message/publish")
-    fun publishMessage(@RequestBody messageForm: MessageForm, request: HttpServletRequest): Boolean {
-        val message = toMessage(form = messageForm)
-        message.ipAddress = getIpAddr(request)
-        messageService.saveMessage(message)
-        return true
-    }
 
-    /**
-     * 普通用户回复消息接口
-     */
-    @PostMapping("/message/{id}/reply")
-    fun replyMessage(@RequestBody messageForm: MessageForm, request: HttpServletRequest): Boolean {
-        val message = toMessage(form = messageForm)
-        message.ipAddress = getIpAddr(request)
-        messageService.saveMessage(message)
-        return true
-    }
-
-    @GetMapping("/current-username")
-    fun currentUserMessage(principal: Principal?): String? = principal?.name
-
-    private fun toMessage(form: MessageForm): Message {
-        var user: User? = null
-        var quoteMessage: Message? = null
-        if (form.quoteId != null) {
-            messageService.findById(form.quoteId!!).ifPresent {
-                quoteMessage = it
-            }
-        }
-        userService.findByUsername(form.username).ifPresent {
-            user = it
-        }
-        return Message(theme = form.theme, content = form.message, user = user, messageQuote = quoteMessage)
-    }
-
-
-    @GetMapping("/messages/theme")
+    @GetMapping("/messages")
     @CrossOrigin
     fun index(
-            @RequestParam(value = "page", defaultValue = "0", required = false) page: Int,
-            @RequestParam(required = false, value = "size", defaultValue = "15") size: Int,
-            principal: Principal?
+            @PageableDefault(size = 15, page = 0) pageable: Pageable
     ): List<Message> {
-        return if(principal==null)
-            messageService.findAllByTheme(PageRequest(page, size, Sort(Sort.Direction.DESC, "id"))).content
-        else{
-            var result:MutableList<Message> = mutableListOf()
-            userService.findByUsername(principal.name).ifPresent { user ->
-                if(user.authorities.any { it.authority =="ADMIN" }){
-                    result.addAll(messageService.findAll(PageRequest(page, size, Sort(Sort.Direction.DESC, "id"))).content)
-                }
+        return messageService.findAllByTheme(pageable).content
+    }
+
+
+    /**
+     * 用户发布消息接口
+     */
+    @PostMapping("/message/publish")
+    fun publishMessage(@RequestBody message: Message, request: HttpServletRequest): Message {
+//        val message = toMessage(form = messageForm)
+        message.ipAddress = getIpAddr(request)
+
+
+        val result = messageService.saveMessage(message)
+        if (message.replyId != null && message.replyId!! > 0) {
+            messageService.findById(message.replyId!!).ifPresent {
+                it.replyNum++
+                it.readNum++
+                messageService.saveMessage(it)
             }
-            result
         }
+        return result
     }
 
-    @GetMapping("/messages/{id}/replyList")
-    fun replyMessageList(@PathVariable("id") id: Long,
-                         @RequestParam(value = "page", defaultValue = "0", required = false) page: Int,
-                         @RequestParam(required = false, value = "size", defaultValue = "15") size: Int
+
+    //    获取消息详情 并且已读＋1
+    @GetMapping("/message/{id}")
+    fun getMessage(@PathVariable("id") message: Message): Message {
+        message.readNum++
+        return messageService.saveMessage(message)
+    }
+
+
+    /**
+     * 用户回复消息接口 回复+1
+     */
+    @PostMapping("/message/{id}/reply")
+    fun replyMessage(@PathVariable("id") message: Message, @RequestBody messageForm: MessageForm, request: HttpServletRequest): Boolean {
+        val reply = toMessage(form = messageForm)
+        reply.ipAddress = getIpAddr(request)
+        reply.replyId = message.id
+        message.replyNum++
+        messageService.saveMessage(reply)
+        messageService.saveMessage(message)
+        return true
+    }
+
+
+    private fun toMessage(form: MessageForm): Message {
+        return Message(theme = form.theme, content = form.message, username = form.username, replyId = form.replyId)
+    }
+
+
+    /**
+     * 消息主题列表
+     */
+
+    @GetMapping("/admin/messages")
+    @CrossOrigin
+    fun adminIndex(
+            @PageableDefault(size = 15, page = 0) pageable: Pageable
     ): List<Message> {
-        return messageService.findAllByReplyList(id, PageRequest(page, size, Sort(Sort.Direction.DESC, "id"))).content
+        return messageService.findAll(pageable).content
     }
 
+    /**
+     * 消息和回复列表
+     */
+    @GetMapping("/messages/{id}/replyList")
+    fun replyMessageList(@PathVariable("id") id: Long
+    ): List<Message> {
+        val data = messageService.findAllByReplyList(id)
+        return data
+    }
 
     class MessageForm(
+            var username: String,
             var message: String,
             var theme: String? = null,
-            var username: String? = null,
-            var quoteId: Long? = null
+            var replyId: Long? = null
     ) : Serializable
 }
 
@@ -120,88 +131,35 @@ class MainController(
  */
 
 @Controller
-class AdminController(private val messageService: IMessageService,
-                      private val userService: IUserService) {
+class AdminController(private val messageService: IMessageService) {
     companion object {
 
         val logger = Logger.getLogger(AdminController::javaClass.name)!!
     }
 
     /**
-     * 管理员页面
-     */
-
-    @GetMapping("/admin")
-    fun admin(): String = "admin"
-
-
-    /**
-     * 管理员审核接口
-     */
-    @PostMapping("/admin/audit/{id}")
-    @ResponseBody
-    fun auditMessage(@PathVariable("id") id: Long, @RequestBody auditForm: AuditForm, principal: Principal): Boolean {
-
-        if (auditForm.audited) {
-            messageService.findById(id).ifPresent {
-                it.display = true
-                messageService.saveMessage(it)
-            }
-        }
-        return true
-    }
-
-    /**
-     * 管理员回复接口
-     */
-    @PostMapping("/admin/reply/{id}")
-    @ResponseBody
-    fun replyMessage(@PathVariable("id") id: Long, @RequestBody auditForm: AuditForm, principal: Principal, request: HttpServletRequest): Boolean {
-
-        messageService.findById(id).ifPresent { message ->
-            message.display = true
-            messageService.saveMessage(message)
-            logger.info("管理员审核消息: $id")
-            userService.findByUsername(principal.name).ifPresent {
-
-                val replyMessage = Message(replyId = id, user = it, content = auditForm.replyMessage, display = true, ipAddress = getIpAddr(request))
-                messageService.saveMessage(replyMessage)
-                logger.info("管理员回复消息 $id： ${auditForm.replyMessage},ip 地址： ${replyMessage.ipAddress}")
-            }
-        }
-        return true
-    }
-
-    /**
      * 管理员删除回复接口
      */
-    @DeleteMapping("/admin/delete/{id}")
+    @PostMapping("/admin/delete/{id}")
     @ResponseBody
-    fun deleteMessage(@PathVariable("id") id: Long, principal: Principal): Boolean {
-        messageService.findById(id).ifPresent {
-            it.display = false
-            it.deleted = true
-            messageService.saveMessage(it)
-            logger.info("管理员删除消息: $id")
-        }
+    fun deleteMessage(@PathVariable("id") message: Message): Boolean {
+        message.deleted = true
+        messageService.saveMessage(message)
+        logger.info("管理员删除消息: ${message.id}")
         return true
     }
 
-    @GetMapping("/isManage")
+    /**
+     * 管理员消息显示
+     */
+
+    @PostMapping("/admin/display/{id}")
     @ResponseBody
-    fun isManage(principal: Principal?): Boolean {
-        var result = false
-        if (principal != null) {
-            val user = userService.findByUsername(principal.name)
-            if (user.isPresent) {
-                val u = user.get()
-                val r = u.authorities.any { it.authority == "ADMIN" }
-                result = r
-            }
-        }
+    fun displayMessage(@PathVariable("id") message: Message): Boolean {
+        message.display = true
+        message.deleted = false
+        messageService.saveMessage(message)
+        logger.info("管理员审核显示消息: ${message.id}")
         return true
     }
-
-
-    class AuditForm(var audited: Boolean = true, var replyMessage: String = "") : Serializable
 }

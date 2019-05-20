@@ -32,7 +32,7 @@ dependencies {
     implementation("org.webjars.npm:vue:2.6.10")
     implementation("org.webjars:jquery:3.4.1")
     implementation("org.webjars:bootstrap:4.3.1")
-    implementation("org.springframework.boot:spring-boot-starter-security")
+//    implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")

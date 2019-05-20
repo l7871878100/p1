@@ -16,9 +16,9 @@
             }
         },
         methods: {
-            getContent: function () {
-                alert(this.editorContent)
-            }
+            // getContent: function () {
+            //     alert(this.editorContent)
+            // }
         },
         mounted() {
             var self = this
